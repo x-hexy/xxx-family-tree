@@ -1,0 +1,204 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --paper-base: #f3ebd8;
+  --paper-panel: #f8f2e3;
+  --ink-main: #1f1b16;
+  --ink-soft: #5e554a;
+  --seal: #a63a2e;
+  --line-bronze: #9b7b3d;
+  color: #1f1b16;
+  background-color: #f3ebd8;
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background:
+    radial-gradient(circle at 10% 12%, rgba(255, 255, 255, 0.52), transparent 42%),
+    radial-gradient(circle at 80% 18%, rgba(214, 193, 149, 0.2), transparent 38%),
+    radial-gradient(circle at 60% 80%, rgba(165, 117, 64, 0.08), transparent 46%),
+    repeating-linear-gradient(
+      90deg,
+      rgba(150, 118, 68, 0.035) 0px,
+      rgba(150, 118, 68, 0.035) 1px,
+      transparent 1px,
+      transparent 4px
+    ),
+    var(--paper-base);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(rgba(56, 42, 26, 0.06) 0.6px, transparent 0.6px),
+    radial-gradient(rgba(56, 42, 26, 0.03) 0.6px, transparent 0.6px);
+  background-size:
+    6px 6px,
+    8px 8px;
+  background-position:
+    0 0,
+    3px 3px;
+  mix-blend-mode: multiply;
+  opacity: 0.35;
+  z-index: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.scroll-frame {
+  position: relative;
+  background: linear-gradient(180deg, rgba(248, 241, 224, 0.9), rgba(239, 226, 201, 0.88));
+  border: 1px solid rgba(155, 123, 61, 0.45);
+}
+
+.scroll-frame::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border: 1px solid rgba(155, 123, 61, 0.35);
+  pointer-events: none;
+}
+
+.tool-btn {
+  @apply w-full rounded border border-bronze/45 bg-parchment px-3 py-2 text-left text-sm text-soot transition duration-300 hover:border-cinnabar hover:text-cinnabar hover:shadow-[0_8px_18px_rgba(31,27,22,0.12)];
+}
+
+.panel-reveal {
+  animation: panelReveal 420ms ease-out both;
+}
+
+.node-card {
+  background:
+    linear-gradient(180deg, rgba(246, 238, 222, 0.96), rgba(231, 219, 193, 0.94)),
+    var(--paper-panel);
+  border: 1px solid rgba(155, 123, 61, 0.55);
+  box-shadow:
+    0 8px 16px rgba(31, 27, 22, 0.16),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+  transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+}
+
+.node-card.is-selected {
+  border-color: rgba(166, 58, 46, 0.86);
+  box-shadow:
+    0 10px 24px rgba(31, 27, 22, 0.2),
+    0 0 0 1px rgba(166, 58, 46, 0.45);
+  transform: translateY(-2px);
+}
+
+.node-card:hover {
+  transform: translateY(-2px);
+}
+
+.node-avatar-ring {
+  box-shadow:
+    0 0 0 2px rgba(155, 123, 61, 0.2),
+    0 6px 12px rgba(31, 27, 22, 0.16);
+}
+
+.generation-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid rgba(155, 123, 61, 0.52);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(248, 239, 220, 0.96), rgba(233, 219, 191, 0.93)),
+    var(--paper-panel);
+  box-shadow:
+    0 6px 12px rgba(31, 27, 22, 0.12),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.generation-strip-seal {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid rgba(166, 58, 46, 0.72);
+  background: rgba(166, 58, 46, 0.12);
+  color: rgba(140, 34, 25, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  letter-spacing: 0.08em;
+}
+
+.generation-strip-text {
+  font-size: 12px;
+  color: #4d4235;
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+}
+
+.family-hub-node {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  border: 1px solid rgba(155, 123, 61, 0.55);
+  background: rgba(233, 218, 188, 0.95);
+  box-shadow: 0 2px 6px rgba(31, 27, 22, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.family-hub-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background-color: rgba(77, 66, 53, 0.8);
+}
+
+.ink-fade {
+  animation: inkFadeIn 560ms ease both;
+}
+
+.ink-fade.delay-1 {
+  animation-delay: 90ms;
+}
+
+.ink-fade.delay-2 {
+  animation-delay: 160ms;
+}
+
+.ink-fade.delay-3 {
+  animation-delay: 220ms;
+}
+
+@keyframes panelReveal {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes inkFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
