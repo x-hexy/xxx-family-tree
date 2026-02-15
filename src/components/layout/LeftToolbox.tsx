@@ -4,6 +4,7 @@ export function LeftToolbox() {
   const startCreateMember = useFamilyStore((s) => s.startCreateMember);
   const startCreateRelationship = useFamilyStore((s) => s.startCreateRelationship);
   const startDeleteRelationship = useFamilyStore((s) => s.startDeleteRelationship);
+  const triggerAutoArrange = useFamilyStore((s) => s.triggerAutoArrange);
 
   return (
     <aside className="scroll-frame w-56 border-r border-bronze/35 bg-[#efe5cf]/80 p-4">
@@ -23,7 +24,9 @@ export function LeftToolbox() {
       <div className="space-y-2">
         <button className="tool-btn">按代际筛选</button>
         <button className="tool-btn">按分支筛选</button>
-        <button className="tool-btn">重置视图</button>
+        <button className="tool-btn" onClick={triggerAutoArrange}>
+          自动整理
+        </button>
       </div>
     </aside>
   );

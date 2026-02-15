@@ -54,3 +54,27 @@ declare module "elkjs/lib/elk.bundled.js" {
     layout(graph: ElkGraph): Promise<ElkGraph>;
   }
 }
+
+declare module "@supabase/supabase-js" {
+  export function createClient(url: string, key: string): {
+    from: (table: string) => {
+      select: (columns: string) => any;
+      insert: (payload: unknown) => Promise<{ error: { message: string } | null }>;
+      update: (payload: unknown) => { eq: (column: string, value: string | number) => Promise<{ error: { message: string } | null }> };
+      delete: () => { eq: (column: string, value: string | number) => Promise<{ error: { message: string } | null }> };
+      upsert: (payload: unknown) => Promise<{ error: { message: string } | null }>;
+      eq: (column: string, value: string | number) => any;
+      maybeSingle: () => Promise<{ data: any; error: { message: string } | null }>;
+    };
+    storage: {
+      from: (bucket: string) => {
+        upload: (
+          path: string,
+          file: Blob,
+          options?: { cacheControl?: string; upsert?: boolean; contentType?: string }
+        ) => Promise<{ error: { message: string } | null }>;
+        getPublicUrl: (path: string) => { data: { publicUrl: string } };
+      };
+    };
+  };
+}

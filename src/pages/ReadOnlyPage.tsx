@@ -6,7 +6,15 @@ import { useFamilyStore } from "../store/useFamilyStore";
 
 export function ReadOnlyPage() {
   const { token } = useParams();
+  const isHydrated = useFamilyStore((s) => s.isHydrated);
   const isValidShareAccess = useFamilyStore((s) => s.isValidShareAccess);
+  if (!isHydrated) {
+    return (
+      <main className="relative z-[1] flex h-screen items-center justify-center bg-parchment text-ink">
+        <div className="scroll-frame rounded-md bg-[#f8f2e3] px-6 py-4 text-sm text-soot">正在验证分享链接...</div>
+      </main>
+    );
+  }
   const canAccess = isValidShareAccess(token);
 
   if (!canAccess) {
