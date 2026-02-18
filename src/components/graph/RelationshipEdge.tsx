@@ -45,7 +45,7 @@ export function RelationshipEdge({
   data,
   selected,
 }: EdgeProps) {
-  const edgeData = (data as EdgeData | undefined) ?? {};
+  const edgeData = (data ?? {}) as Partial<EdgeData>;
   const bundleIndex = edgeData.bundleIndex ?? 0;
   const bundleTotal = edgeData.bundleTotal ?? 1;
 
