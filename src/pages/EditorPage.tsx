@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { TopBar } from "../components/layout/TopBar";
 import { LeftToolbox } from "../components/layout/LeftToolbox";
 import { RightPanel } from "../components/layout/RightPanel";
@@ -7,6 +8,7 @@ import { useFamilyStore } from "../store/useFamilyStore";
 export function EditorPage() {
   const isHydrated = useFamilyStore((s) => s.isHydrated);
   const syncError = useFamilyStore((s) => s.syncError);
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
 
   if (!isHydrated) {
     return (
@@ -28,17 +30,26 @@ export function EditorPage() {
         <div className="ink-fade delay-1">
           <LeftToolbox />
         </div>
-        <div className="flex-1 p-3 panel-reveal">
+        <div className="relative flex-1 p-3 panel-reveal">
           <div
             id="family-graph-canvas"
             className="scroll-frame h-full overflow-hidden rounded-md bg-[#f8f2e3]"
           >
             <FamilyGraph />
           </div>
+          <button
+            className="absolute right-0 top-1/2 z-30 -translate-y-1/2 rounded-l border border-r-0 border-bronze/45 bg-parchment px-1 py-4 text-xs text-soot transition hover:text-cinnabar"
+            onClick={() => setRightPanelOpen((prev) => !prev)}
+            title={rightPanelOpen ? "收起面板" : "展开面板"}
+          >
+            {rightPanelOpen ? "▶" : "◀"}
+          </button>
         </div>
-        <div className="ink-fade delay-2">
-          <RightPanel />
-        </div>
+        {rightPanelOpen && (
+          <div className="ink-fade delay-2">
+            <RightPanel />
+          </div>
+        )}
       </section>
     </main>
   );

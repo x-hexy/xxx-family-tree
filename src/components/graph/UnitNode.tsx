@@ -4,92 +4,95 @@ import type { Member } from "../../types/family";
 type UnitNodeData = {
   members: Member[];
   selectedMemberId?: string | null;
+  isHovered?: boolean;
   onSelectMember?: (memberId: string) => void;
-  canSwap?: boolean;
-  onSwap?: () => void;
+  onHover?: (isHovering: boolean) => void;
 };
+
+// 根据中文名推断性别：女性关键字返回 "F"，否则 "M"
+const FEMALE_KEYS = ["奶", "婆", "妈", "母", "姑", "姨", "姐", "妹", "嫂", "妻", "老婆", "女儿", "女"];
+function inferGender(member: Member): "M" | "F" {
+  const name = member.name;
+  const id = member.id;
+  if (id.endsWith("_wife") || id.includes("_wife_")) return "F";
+  if (id.endsWith("_husband") || id.includes("_husband_")) return "M";
+  if (id.endsWith("_daughter")) return "F";
+  if (id.endsWith("_son")) return "M";
+  for (const key of FEMALE_KEYS) {
+    if (name.includes(key)) return "F";
+  }
+  return "M";
+}
+
+// 排序成员：男左女右；同性别保持原序
+function sortMaleFemale(members: Member[]): Member[] {
+  if (members.length <= 1) return members;
+  const males = members.filter((m) => inferGender(m) === "M");
+  const females = members.filter((m) => inferGender(m) === "F");
+  return [...males, ...females];
+}
 
 function MemberAvatar({ member }: { member: Member }) {
   return member.avatarUrl ? (
     <img
       src={member.avatarUrl}
       alt={member.name}
-      className="node-avatar-ring h-14 w-14 rounded-full border border-bronze/50 object-cover"
+      className="node-avatar-ring h-20 w-20 rounded-full border-2 border-bronze/60 object-cover transition-transform duration-200 hover:scale-110"
     />
   ) : (
-    <div className="node-avatar-ring flex h-14 w-14 items-center justify-center rounded-full border border-bronze/50 bg-[#e7dcc5] text-xs text-soot">
+    <div className="node-avatar-ring flex h-20 w-20 items-center justify-center rounded-full border-2 border-bronze/50 bg-[#e7dcc5] text-sm text-soot">
       照片
     </div>
   );
 }
 
-const SIDE_OFFSETS = [20, 50, 80] as const;
-
-function renderHandles(type: "source" | "target", side: "top" | "right" | "bottom" | "left") {
-  return SIDE_OFFSETS.map((offset, index) => {
-    const slot = index + 1;
-    const id = `${type === "source" ? "s" : "t"}-${side}-${slot}`;
-    const style =
-      side === "top" || side === "bottom" ? { left: `${offset}%` } : { top: `${offset}%` };
-    const position =
-      side === "top"
-        ? Position.Top
-        : side === "right"
-          ? Position.Right
-          : side === "bottom"
-            ? Position.Bottom
-            : Position.Left;
-
-    return (
+// 只保留上下2个锚点
+function renderHandles() {
+  return (
+    <>
       <Handle
-        key={id}
-        id={id}
-        type={type}
-        position={position}
-        className={`member-handle member-handle--${side}`}
-        style={style}
+        id="t-top"
+        type="target"
+        position={Position.Top}
+        className="member-handle member-handle--top"
+        style={{ left: "50%" }}
       />
-    );
-  });
+      <Handle
+        id="s-bottom"
+        type="source"
+        position={Position.Bottom}
+        className="member-handle member-handle--bottom"
+        style={{ left: "50%" }}
+      />
+    </>
+  );
 }
 
 export function UnitNode({ data, selected }: NodeProps) {
   const nodeData = data as UnitNodeData;
-  const members = nodeData.members;
-  const canSwap = Boolean(nodeData.canSwap && typeof nodeData.onSwap === "function");
+  const members = sortMaleFemale(nodeData.members);
+  const isHovered = Boolean(nodeData.isHovered);
+
   return (
-    <div className={`node-card ink-fade relative w-[300px] rounded p-3 ${selected ? "is-selected" : ""}`}>
-      {renderHandles("target", "top")}
-      {renderHandles("target", "right")}
-      {renderHandles("target", "bottom")}
-      {renderHandles("target", "left")}
-      {renderHandles("source", "top")}
-      {renderHandles("source", "right")}
-      {renderHandles("source", "bottom")}
-      {renderHandles("source", "left")}
-      {canSwap && (
-        <button
-          className="absolute right-2 top-2 rounded border border-bronze/40 bg-[#f8f1df] px-2 py-1 text-xs text-soot hover:border-cinnabar hover:text-cinnabar"
-          onClick={(event) => {
-            event.stopPropagation();
-            nodeData.onSwap?.();
-          }}
-          title="夫妻位置互换"
-        >
-          互换
-        </button>
-      )}
-      <div className={`grid gap-4 ${members.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
+    <div
+      className={`node-card ink-fade relative w-[300px] rounded p-3 ${selected ? "is-selected" : ""} ${isHovered ? "is-hovered" : ""}`}
+      onMouseEnter={() => nodeData.onHover?.(true)}
+      onMouseLeave={() => nodeData.onHover?.(false)}
+    >
+      {renderHandles()}
+      <div
+        className={`grid gap-4 ${members.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}
+      >
         {members.map((member) => (
           <button
             key={member.id}
-            className="text-center"
+            className="flex flex-col items-center text-center"
             onClick={(event) => {
               event.stopPropagation();
               nodeData.onSelectMember?.(member.id);
             }}
           >
-            <div className="mb-2 flex justify-center">
+            <div className="mb-2 flex h-24 items-center justify-center">
               <div
                 className={
                   nodeData.selectedMemberId === member.id
@@ -100,7 +103,9 @@ export function UnitNode({ data, selected }: NodeProps) {
                 <MemberAvatar member={member} />
               </div>
             </div>
-            <div className="font-serifCn text-2xl tracking-wide text-ink">{member.name}</div>
+            <div className="font-serifCn text-2xl leading-tight tracking-wide text-ink">
+              {member.name}
+            </div>
           </button>
         ))}
       </div>

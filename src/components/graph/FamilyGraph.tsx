@@ -1,4 +1,10 @@
-﻿import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+﻿import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import {
   Background,
   ConnectionMode,
@@ -11,7 +17,7 @@ import {
   type Node,
   type NodeMouseHandler,
   type OnReconnect,
-  type ReactFlowInstance
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import { useFamilyStore } from "../../store/useFamilyStore";
 import type { RelationType } from "../../types/family";
@@ -27,12 +33,11 @@ type FamilyGraphProps = {
   readOnly?: boolean;
 };
 
-
 function unitGeneration(
   unitId: string,
   unitGenerationValue: number | undefined,
   unitMemberIds: Map<string, string[]>,
-  memberGenerationMap: Map<string, number>
+  memberGenerationMap: Map<string, number>,
 ): number {
   if (typeof unitGenerationValue === "number") return unitGenerationValue;
   const memberIds = unitMemberIds.get(unitId) ?? [];
@@ -43,70 +48,203 @@ function unitGeneration(
   return Math.min(...gens);
 }
 
-function calculateUnitLayout(
+function calculateTreeLayout(
   units: Array<{ id: string; name: string; generation: number }>,
+  parentToChildren: Map<string, Set<string>>,
   xGap: number,
-  yGap: number
+  yGap: number,
 ): Record<string, { x: number; y: number }> {
+  const unitSet = new Set(units.map((u) => u.id));
   const grouped = new Map<number, Array<{ id: string; name: string }>>();
   for (const unit of units) {
     const group = grouped.get(unit.generation) ?? [];
     group.push({ id: unit.id, name: unit.name });
     grouped.set(unit.generation, group);
   }
-
   const generations = [...grouped.keys()].sort((a, b) => a - b);
-  const positions: Record<string, { x: number; y: number }> = {};
+  if (generations.length === 0) return {};
 
-  generations.forEach((generation, row) => {
-    const group = (grouped.get(generation) ?? []).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
-    const totalWidth = (group.length - 1) * xGap;
-    const startX = 360 - totalWidth / 2;
-    group.forEach((unit, col) => {
-      positions[unit.id] = { x: startX + col * xGap, y: 120 + row * yGap };
-    });
+  // 判断unit是否属于母系（名称含"外"字）
+  const isMaternalUnit = (unitId: string) => {
+    const name = units.find((u) => u.id === unitId)?.name ?? "";
+    return name.includes("外");
+  };
+
+  // 每个子节点只归属一个"主父节点"（避免多父导致重复计算子树宽度）
+  const primaryParent = new Map<string, string>();
+  const primaryChildren = new Map<string, string[]>();
+  for (const unit of units) {
+    const parents: string[] = [];
+    for (const [pid, children] of parentToChildren.entries()) {
+      if (children.has(unit.id) && unitSet.has(pid)) parents.push(pid);
+    }
+    if (parents.length > 0) {
+      // 多个父时：优先选父系（非"外"）parent，同辈按名字排序
+      parents.sort((a, b) => {
+        const ga = units.find((u) => u.id === a)?.generation ?? 99;
+        const gb = units.find((u) => u.id === b)?.generation ?? 99;
+        if (ga !== gb) return ga - gb;
+        // 同辈时，父系优先于母系
+        const ma = isMaternalUnit(a) ? 1 : 0;
+        const mb = isMaternalUnit(b) ? 1 : 0;
+        return ma - mb || a.localeCompare(b);
+      });
+      primaryParent.set(unit.id, parents[0]);
+      const list = primaryChildren.get(parents[0]) ?? [];
+      list.push(unit.id);
+      primaryChildren.set(parents[0], list);
+    }
+  }
+
+  // 计算每个节点的子树宽度（基于primaryChildren）
+  const subtreeWidth = new Map<string, number>();
+  const calcWidth = (id: string): number => {
+    if (subtreeWidth.has(id)) return subtreeWidth.get(id)!;
+    const children = (primaryChildren.get(id) ?? []).filter((c) =>
+      unitSet.has(c),
+    );
+    const w =
+      children.length === 0
+        ? 1
+        : children.reduce((s, c) => s + calcWidth(c), 0);
+    subtreeWidth.set(id, w);
+    return w;
+  };
+  for (const u of units) calcWidth(u.id);
+
+  // 从第一代开始分配x坐标
+  const positions: Record<string, { x: number; y: number }> = {};
+  // 父系（非"外"）排左边，母系（含"外"）排右边
+  const topGroup = (grouped.get(generations[0]) ?? []).sort((a, b) => {
+    const ma = a.name.includes("外") ? 1 : 0;
+    const mb = b.name.includes("外") ? 1 : 0;
+    return ma - mb || a.name.localeCompare(b.name, "zh-CN");
   });
+
+  let totalTopWidth = 0;
+  for (const unit of topGroup) {
+    totalTopWidth += (subtreeWidth.get(unit.id) ?? 1) * xGap;
+  }
+  totalTopWidth -= xGap;
+
+  let cursor = 360 - totalTopWidth / 2;
+  for (const unit of topGroup) {
+    const w = (subtreeWidth.get(unit.id) ?? 1) * xGap;
+    positions[unit.id] = { x: cursor + w / 2 - xGap / 2, y: 120 };
+    cursor += w;
+  }
+
+  // 逐代分配：子节点居中于主父节点下方
+  const placed = new Set(topGroup.map((u) => u.id));
+  const minDist = UNIT_CARD_WIDTH + UNIT_CARD_MIN_GAP;
+
+  for (let i = 1; i < generations.length; i++) {
+    const gen = generations[i];
+    const row = grouped.get(gen) ?? [];
+    const y = 120 + i * yGap;
+
+    // 按主父节点分组
+    const parentGroupsMap = new Map<
+      string,
+      Array<{ id: string; name: string }>
+    >();
+    const orphans: Array<{ id: string; name: string }> = [];
+
+    for (const unit of row) {
+      const pid = primaryParent.get(unit.id);
+      if (pid && placed.has(pid)) {
+        const group = parentGroupsMap.get(pid) ?? [];
+        group.push(unit);
+        parentGroupsMap.set(pid, group);
+      } else {
+        orphans.push(unit);
+      }
+    }
+
+    // 按父节点x坐标排序分配
+    const sortedParents = [...parentGroupsMap.entries()].sort(
+      ([a], [b]) => (positions[a]?.x ?? 0) - (positions[b]?.x ?? 0),
+    );
+
+    for (const [parentId, children] of sortedParents) {
+      const parentPos = positions[parentId];
+      if (!parentPos) continue;
+      const totalChildWidth = (children.length - 1) * xGap;
+      const startX = parentPos.x - totalChildWidth / 2;
+      children.forEach((child, idx) => {
+        positions[child.id] = { x: startX + idx * xGap, y };
+        placed.add(child.id);
+      });
+    }
+
+    // 孤立节点排在最右
+    if (orphans.length > 0) {
+      const allPlacedX = Object.values(positions).map((p) => p.x);
+      const maxX = allPlacedX.length > 0 ? Math.max(...allPlacedX) : 0;
+      let orphanCursor = maxX + xGap;
+      for (const unit of orphans.sort((a, b) =>
+        a.name.localeCompare(b.name, "zh-CN"),
+      )) {
+        positions[unit.id] = { x: orphanCursor, y };
+        placed.add(unit.id);
+        orphanCursor += xGap;
+      }
+    }
+
+    // 碰撞检测与修正：同一行内，按x排序，发现重叠则向右推
+    const rowUnits = row.filter((u) => positions[u.id]);
+    rowUnits.sort(
+      (a, b) => (positions[a.id]?.x ?? 0) - (positions[b.id]?.x ?? 0),
+    );
+    for (let j = 1; j < rowUnits.length; j++) {
+      const prev = positions[rowUnits[j - 1].id];
+      const curr = positions[rowUnits[j].id];
+      if (!prev || !curr) continue;
+      const gap = curr.x - prev.x;
+      if (gap < minDist) {
+        const shift = minDist - gap;
+        // 向右推当前及后续所有节点
+        for (let k = j; k < rowUnits.length; k++) {
+          const p = positions[rowUnits[k].id];
+          if (p) p.x += shift;
+        }
+      }
+    }
+
+    // 推完后重新居中整行（保持整体居中）
+    if (rowUnits.length > 1) {
+      const xs = rowUnits.map((u) => positions[u.id]?.x ?? 0);
+      const rowCenter = (Math.min(...xs) + Math.max(...xs)) / 2;
+      // 计算所有父节点的中心
+      const parentXs = sortedParents.map(([pid]) => positions[pid]?.x ?? 0);
+      if (parentXs.length > 0) {
+        const parentsCenter =
+          (Math.min(...parentXs) + Math.max(...parentXs)) / 2;
+        const drift = parentsCenter - rowCenter;
+        for (const u of rowUnits) {
+          const p = positions[u.id];
+          if (p) p.x += drift;
+        }
+      }
+    }
+  }
+
+  // 处理未布局的节点
+  for (const unit of units) {
+    if (!positions[unit.id]) {
+      positions[unit.id] = { x: 100, y: 100 };
+    }
+  }
 
   return positions;
 }
 
-function hashSlot(input: string, mod: number): number {
-  let hash = 0;
-  for (let i = 0; i < input.length; i += 1) {
-    hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
-  }
-  return hash % mod;
-}
-
-function inferRelationType(connection: Connection): typeof REL_PARENT_CHILD | typeof REL_SIBLING {
-  const sourceHandle = connection.sourceHandle ?? "";
-  const targetHandle = connection.targetHandle ?? "";
-  const isLateral =
-    (sourceHandle.includes("-left-") || sourceHandle.includes("-right-")) &&
-    (targetHandle.includes("-left-") || targetHandle.includes("-right-"));
-  return isLateral ? REL_SIBLING : REL_PARENT_CHILD;
-}
-
-function resolveRelationHandles(
-  relation: { id: string; fromUnitId: string; toUnitId: string; relationType: typeof REL_PARENT_CHILD | typeof REL_SIBLING },
-  positions: Record<string, { x: number; y: number }>
-): { sourceHandle?: string; targetHandle?: string; lane: number } {
-  if (relation.relationType === REL_PARENT_CHILD) {
-    const sourceSlot = hashSlot(`${relation.id}:source`, 3) + 1;
-    const targetSlot = hashSlot(`${relation.id}:target`, 3) + 1;
-    return {
-      sourceHandle: `s-bottom-${sourceSlot}`,
-      targetHandle: `t-top-${targetSlot}`,
-      lane: sourceSlot - 2
-    };
-  }
-
-  const sourcePos = positions[relation.fromUnitId];
-  const targetPos = positions[relation.toUnitId];
-  const leftToRight = !sourcePos || !targetPos ? true : sourcePos.x <= targetPos.x;
-  return leftToRight
-    ? { sourceHandle: "s-right-2", targetHandle: "t-left-2", lane: 0 }
-    : { sourceHandle: "s-left-2", targetHandle: "t-right-2", lane: 0 };
+// 所有关系统一使用上下锚点
+function resolveRelationHandles(): {
+  sourceHandle: string;
+  targetHandle: string;
+} {
+  return { sourceHandle: "s-bottom", targetHandle: "t-top" };
 }
 
 function resolveNonOverlapX(
@@ -114,10 +252,12 @@ function resolveNonOverlapX(
   movingUnitId: string,
   generation: number,
   units: Array<{ id: string; generation: number }>,
-  positions: Record<string, { x: number; y: number }>
+  positions: Record<string, { x: number; y: number }>,
 ): number {
   const blocked = units
-    .filter((unit) => unit.id !== movingUnitId && unit.generation === generation)
+    .filter(
+      (unit) => unit.id !== movingUnitId && unit.generation === generation,
+    )
     .map((unit) => positions[unit.id]?.x)
     .filter((x): x is number => typeof x === "number")
     .sort((a, b) => a - b);
@@ -125,7 +265,8 @@ function resolveNonOverlapX(
   if (blocked.length === 0) return candidateX;
 
   const minDistance = UNIT_CARD_WIDTH + UNIT_CARD_MIN_GAP;
-  const intersects = (x: number) => blocked.some((bx) => Math.abs(x - bx) < minDistance);
+  const intersects = (x: number) =>
+    blocked.some((bx) => Math.abs(x - bx) < minDistance);
   if (!intersects(candidateX)) return candidateX;
 
   const step = 12;
@@ -138,7 +279,9 @@ function resolveNonOverlapX(
   return candidateX;
 }
 
-function toLegacyRelationType(type: typeof REL_PARENT_CHILD | typeof REL_SIBLING): RelationType {
+function toLegacyRelationType(
+  type: typeof REL_PARENT_CHILD | typeof REL_SIBLING,
+): RelationType {
   return type === REL_PARENT_CHILD ? "parent" : "sibling";
 }
 
@@ -156,24 +299,37 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
   const setFocusUnitId = useFamilyStore((s) => s.setFocusUnitId);
   const showParentChildLines = useFamilyStore((s) => s.showParentChildLines);
   const showSiblingLines = useFamilyStore((s) => s.showSiblingLines);
+  const filterGenerations = useFamilyStore((s) => s.filterGenerations);
   const nodePositions = useFamilyStore((s) => s.nodePositions);
   const setNodePosition = useFamilyStore((s) => s.setNodePosition);
-  const swapUnitPartners = useFamilyStore((s) => s.swapUnitPartners);
+  const setNodePositions = useFamilyStore((s) => s.setNodePositions);
+  const layoutRequestVersion = useFamilyStore((s) => s.layoutRequestVersion);
   const addUnitRelation = useFamilyStore((s) => s.addUnitRelation);
   const reconnectUnitRelation = useFamilyStore((s) => s.reconnectUnitRelation);
   const deleteUnitRelation = useFamilyStore((s) => s.deleteUnitRelation);
 
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
-  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const [reactFlowInstance, setReactFlowInstance] =
+    useState<ReactFlowInstance | null>(null);
   const [connectMessage, setConnectMessage] = useState("");
+  const [hoveredUnitId, setHoveredUnitId] = useState<string | null>(null);
   const connectingRef = useRef(false);
   const connectedRef = useRef(false);
 
-  const memberMap = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
-  const memberGenerationMap = useMemo(() => new Map(members.map((m) => [m.id, m.generation ?? 99])), [members]);
+  const memberMap = useMemo(
+    () => new Map(members.map((m) => [m.id, m])),
+    [members],
+  );
+  const memberGenerationMap = useMemo(
+    () => new Map(members.map((m) => [m.id, m.generation ?? 99])),
+    [members],
+  );
 
   const unitMemberRows = useMemo(() => {
-    const map = new Map<string, Array<{ memberId: string; role: "single" | "partner1" | "partner2" }>>();
+    const map = new Map<
+      string,
+      Array<{ memberId: string; role: "single" | "partner1" | "partner2" }>
+    >();
     for (const row of unitMembers) {
       const list = map.get(row.unitId) ?? [];
       list.push({ memberId: row.memberId, role: row.role });
@@ -190,7 +346,10 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
   const unitMemberIds = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const [unitId, rows] of unitMemberRows.entries()) {
-      map.set(unitId, rows.map((row) => row.memberId));
+      map.set(
+        unitId,
+        rows.map((row) => row.memberId),
+      );
     }
     return map;
   }, [unitMemberRows]);
@@ -200,9 +359,14 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
       units.map((u) => ({
         id: u.id,
         name: u.name,
-        generation: unitGeneration(u.id, u.generation, unitMemberIds, memberGenerationMap)
+        generation: unitGeneration(
+          u.id,
+          u.generation,
+          unitMemberIds,
+          memberGenerationMap,
+        ),
       })),
-    [units, unitMemberIds, memberGenerationMap]
+    [units, unitMemberIds, memberGenerationMap],
   );
 
   const neighbors = useMemo(() => {
@@ -238,7 +402,8 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
   }, [unitRelations]);
 
   const effectiveFocusUnitId = useMemo(() => {
-    if (focusUnitId && units.some((u) => u.id === focusUnitId)) return focusUnitId;
+    if (focusUnitId && units.some((u) => u.id === focusUnitId))
+      return focusUnitId;
     return units[0]?.id ?? null;
   }, [focusUnitId, units]);
 
@@ -247,7 +412,9 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
     if (!effectiveFocusUnitId) return new Set<string>();
     const focusNeighborhood = () => {
       const visited = new Set<string>([effectiveFocusUnitId]);
-      const queue: Array<{ id: string; depth: number }> = [{ id: effectiveFocusUnitId, depth: 0 }];
+      const queue: Array<{ id: string; depth: number }> = [
+        { id: effectiveFocusUnitId, depth: 0 },
+      ];
       const maxDepth = 2;
       while (queue.length > 0) {
         const current = queue.shift();
@@ -266,55 +433,96 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
 
     if (viewMode === "focus") return focusNeighborhood();
 
-    const focusParents = [...(childToParents.get(effectiveFocusUnitId) ?? new Set<string>())];
-    if (focusParents.length === 0) return focusNeighborhood();
-
-    const unitNameIncludes = (unitId: string, keywords: string[]) => {
+    // 父系/母系筛选：找到祖辈unit作为分支根节点
+    const unitHasKeyword = (unitId: string, keywords: string[]) => {
       const rows = unitMemberRows.get(unitId) ?? [];
       return rows.some((row) => {
-        const memberName = memberMap.get(row.memberId)?.name ?? "";
-        return keywords.some((keyword) => memberName.includes(keyword));
+        const name = memberMap.get(row.memberId)?.name ?? "";
+        return keywords.some((k) => name.includes(k));
       });
     };
 
-    const paternalKeys = ["爸", "父", "爷", "伯", "叔", "姑"];
-    const maternalKeys = ["妈", "母", "外", "舅", "姨", "姐"];
-    const rootId =
-      (viewMode === "paternal"
-        ? focusParents.find((id) => unitNameIncludes(id, paternalKeys))
-        : focusParents.find((id) => unitNameIncludes(id, maternalKeys))) ?? focusParents[0];
+    // 父系根关键字：爷爷奶奶一辈
+    const paternalRootKeys = ["爷", "奶"];
+    // 母系根关键字：外公外婆一辈
+    const maternalRootKeys = ["外公", "外婆", "外"];
+    const rootKeys =
+      viewMode === "paternal" ? paternalRootKeys : maternalRootKeys;
 
-    const visited = new Set<string>([rootId, effectiveFocusUnitId]);
-    const queue = [rootId];
+    // 策略1：从焦点unit向上追溯所有祖先，找到匹配分支根关键字的unit
+    const allAncestors = new Set<string>();
+    const ancestorQueue = [effectiveFocusUnitId];
+    while (ancestorQueue.length > 0) {
+      const cur = ancestorQueue.shift()!;
+      const parents = childToParents.get(cur) ?? new Set<string>();
+      for (const p of parents) {
+        if (allAncestors.has(p)) continue;
+        allAncestors.add(p);
+        ancestorQueue.push(p);
+      }
+    }
+
+    let branchRoots = [...allAncestors]
+      .filter((id) => unitHasKeyword(id, rootKeys))
+      .sort((a, b) => {
+        const genA = normalizedUnits.find((u) => u.id === a)?.generation ?? 99;
+        const genB = normalizedUnits.find((u) => u.id === b)?.generation ?? 99;
+        return genA - genB;
+      });
+
+    // 策略2：若祖先中找不到（可能缺少跨分支parent_child链接），搜索全部unit
+    if (branchRoots.length === 0) {
+      branchRoots = normalizedUnits
+        .filter((u) => unitHasKeyword(u.id, rootKeys))
+        .map((u) => u.id)
+        .sort((a, b) => {
+          const genA =
+            normalizedUnits.find((u) => u.id === a)?.generation ?? 99;
+          const genB =
+            normalizedUnits.find((u) => u.id === b)?.generation ?? 99;
+          return genA - genB;
+        });
+    }
+
+    if (branchRoots.length === 0) return focusNeighborhood();
+
+    // 只取最高辈（generation最小）的根，避免跨分支污染
+    const topGen =
+      normalizedUnits.find((u) => u.id === branchRoots[0])?.generation ?? 99;
+    const topRoots = branchRoots.filter((id) => {
+      const gen = normalizedUnits.find((u) => u.id === id)?.generation ?? 99;
+      return gen === topGen;
+    });
+
+    // 从根开始BFS向下展开（只走parent_child，不走sibling，避免跨分支污染）
+    const visited = new Set<string>([effectiveFocusUnitId]);
+    for (const root of topRoots) visited.add(root);
+    const queue = [...topRoots];
     while (queue.length > 0) {
-      const current = queue.shift();
-      if (!current) continue;
+      const current = queue.shift()!;
       const children = parentToChildren.get(current) ?? new Set<string>();
       for (const child of children) {
         if (visited.has(child)) continue;
         visited.add(child);
         queue.push(child);
       }
-      const parents = childToParents.get(current) ?? new Set<string>();
-      for (const parent of parents) {
-        if (visited.has(parent)) continue;
-        visited.add(parent);
-        queue.push(parent);
-      }
-      const siblingCandidates = neighbors.get(current) ?? new Set<string>();
-      for (const siblingId of siblingCandidates) {
-        const hasSiblingRelation = unitRelations.some(
-          (relation) =>
-            relation.relationType === REL_SIBLING &&
-            ((relation.fromUnitId === current && relation.toUnitId === siblingId) ||
-              (relation.toUnitId === current && relation.fromUnitId === siblingId))
-        );
-        if (!hasSiblingRelation) continue;
-        if (visited.has(siblingId)) continue;
-        visited.add(siblingId);
-        queue.push(siblingId);
+    }
+    // 也包含焦点unit的直接父unit（爸妈合并unit）
+    const focusParents =
+      childToParents.get(effectiveFocusUnitId) ?? new Set<string>();
+    for (const p of focusParents) visited.add(p);
+
+    // 跨分支连线：对于已在可见集合中的unit，如果它有来自另一分支的parent，
+    // 也纳入可见集合，以便渲染跨分支连线（如：爸爸妈妈 ← 外公外婆）
+    const crossBranchParents: string[] = [];
+    for (const uid of visited) {
+      const parents = childToParents.get(uid) ?? new Set<string>();
+      for (const p of parents) {
+        if (!visited.has(p)) crossBranchParents.push(p);
       }
     }
+    for (const p of crossBranchParents) visited.add(p);
+
     return visited;
   }, [
     viewMode,
@@ -325,32 +533,63 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
     parentToChildren,
     unitMemberRows,
     memberMap,
-    unitRelations
+    unitRelations,
+    normalizedUnits,
   ]);
 
-  const visibleUnits = useMemo(() => normalizedUnits.filter((u) => visibleUnitIds.has(u.id)), [normalizedUnits, visibleUnitIds]);
+  const visibleUnits = useMemo(
+    () =>
+      normalizedUnits.filter((u) => {
+        if (!visibleUnitIds.has(u.id)) return false;
+        if (filterGenerations && !filterGenerations.has(u.generation))
+          return false;
+        return true;
+      }),
+    [normalizedUnits, visibleUnitIds, filterGenerations],
+  );
 
   const visibleRelations = useMemo(
     () =>
       unitRelations.filter((r) => {
-        if (!visibleUnitIds.has(r.fromUnitId) || !visibleUnitIds.has(r.toUnitId)) return false;
+        if (
+          !visibleUnitIds.has(r.fromUnitId) ||
+          !visibleUnitIds.has(r.toUnitId)
+        )
+          return false;
         if (r.relationType === REL_PARENT_CHILD) return showParentChildLines;
         if (r.relationType === REL_SIBLING) return showSiblingLines;
         return false;
       }),
-    [unitRelations, visibleUnitIds, showParentChildLines, showSiblingLines]
+    [unitRelations, visibleUnitIds, showParentChildLines, showSiblingLines],
   );
 
   const autoPositions = useMemo(() => {
-    const compact = viewMode === "overview" ? { xGap: 360, yGap: 260 } : { xGap: 320, yGap: 260 };
-    return calculateUnitLayout(visibleUnits, compact.xGap, compact.yGap);
-  }, [visibleUnits, viewMode]);
+    const xGap = viewMode === "overview" ? 380 : 360;
+    const yGap = 300;
+    return calculateTreeLayout(visibleUnits, parentToChildren, xGap, yGap);
+  }, [visibleUnits, parentToChildren, viewMode]);
+
+  // 自动整理：清除手动位置，回到自动布局
+  const lastLayoutVersion = useRef(0);
+  useEffect(() => {
+    if (layoutRequestVersion === 0) return;
+    if (layoutRequestVersion === lastLayoutVersion.current) return;
+    lastLayoutVersion.current = layoutRequestVersion;
+    setNodePositions({});
+    if (reactFlowInstance) {
+      setTimeout(
+        () => reactFlowInstance.fitView({ duration: 400, padding: 0.2 }),
+        50,
+      );
+    }
+  }, [layoutRequestVersion, setNodePositions, reactFlowInstance]);
 
   const positions = useMemo(() => {
     const out: Record<string, { x: number; y: number }> = {};
     for (const unit of visibleUnits) {
       const key = `unit:${unit.id}`;
-      const fromStore = viewMode === "overview" ? nodePositions[key] : undefined;
+      const fromStore =
+        viewMode === "overview" ? nodePositions[key] : undefined;
       out[unit.id] = fromStore ?? autoPositions[unit.id] ?? { x: 100, y: 100 };
     }
     return out;
@@ -376,15 +615,20 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
           draggable: false,
           selectable: false,
           connectable: false,
-          style: { background: "transparent", border: "none", boxShadow: "none", padding: 0 },
+          style: {
+            background: "transparent",
+            border: "none",
+            boxShadow: "none",
+            padding: 0,
+          },
           data: {
             label: (
               <div className="generation-strip ink-fade">
                 <div className="generation-strip-seal">谱</div>
                 <div className="generation-strip-text">第 {generation} 代</div>
               </div>
-            )
-          }
+            ),
+          },
         } as Node;
       });
   }, [visibleUnits, positions]);
@@ -417,19 +661,26 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
         type: "unitNode",
         position: positions[unit.id] ?? { x: 100, y: 100 },
         draggable: !readOnly && viewMode === "overview",
-        style: { background: "transparent", border: "none", boxShadow: "none", padding: 0 },
+        style: {
+          background: "transparent",
+          border: "none",
+          boxShadow: "none",
+          padding: 0,
+        },
         data: {
           members: membersInUnit,
           selectedMemberId,
+          isHovered: hoveredUnitId === unit.id,
           onSelectMember: (memberId: string) => {
             setSelectedMemberId(memberId);
             setSelectedUnitId(unit.id);
             setFocusUnitId(unit.id);
             setSelectedEdgeId(null);
           },
-          canSwap: unitRows.filter((row) => row.role === "partner1" || row.role === "partner2").length === 2,
-          onSwap: () => swapUnitPartners(unit.id)
-        }
+          onHover: (isHovering: boolean) => {
+            setHoveredUnitId(isHovering ? unit.id : null);
+          },
+        },
       } as Node;
     });
     return [...generationStrips, ...unitNodes];
@@ -441,21 +692,65 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
     readOnly,
     viewMode,
     generationStrips,
-    swapUnitPartners,
     selectedMemberId,
     setSelectedMemberId,
     setSelectedUnitId,
-    setFocusUnitId
+    setFocusUnitId,
   ]);
 
   const edges = useMemo<Edge[]>(() => {
+    const handles = resolveRelationHandles();
+
+    // 计算线条捆绑信息：统计从同一源节点出发的边数量
+    const bundleGroups = new Map<string, string[]>();
+    for (const rel of visibleRelations) {
+      const group = bundleGroups.get(rel.fromUnitId) ?? [];
+      group.push(rel.id);
+      bundleGroups.set(rel.fromUnitId, group);
+    }
+
     return visibleRelations.map((rel) => {
-      const handles = resolveRelationHandles(rel, positions);
       const relationType = toLegacyRelationType(rel.relationType);
-      const style =
+
+      const bundleGroup = bundleGroups.get(rel.fromUnitId) ?? [];
+      const bundleIndex = bundleGroup.indexOf(rel.id);
+      const bundleTotal = bundleGroup.length;
+
+      const isRelated =
+        hoveredUnitId &&
+        (rel.fromUnitId === hoveredUnitId || rel.toUnitId === hoveredUnitId);
+      const isUnrelated = hoveredUnitId && !isRelated;
+
+      const baseStyle =
         relationType === "sibling"
-          ? { stroke: "#6D6255", strokeWidth: 1.8, strokeDasharray: "3 6", strokeLinecap: "round" }
-          : { stroke: "#4D4235", strokeWidth: 1.5, strokeLinecap: "round" };
+          ? {
+              stroke: "#9B7B3D",
+              strokeWidth: 1.5,
+              strokeDasharray: "4 8",
+              strokeLinecap: "round",
+              opacity: 0.65,
+            }
+          : {
+              stroke: "#4D4235",
+              strokeWidth: 2.2,
+              strokeLinecap: "round",
+              opacity: 0.9,
+              filter: "drop-shadow(0 1px 2px rgba(77, 66, 53, 0.15))",
+            };
+
+      const style = isRelated
+        ? {
+            ...baseStyle,
+            stroke: "#A63A2E",
+            strokeWidth: Number(baseStyle.strokeWidth) + 1.2,
+            opacity: 1,
+            filter: "drop-shadow(0 0 6px rgba(166, 58, 46, 0.6))",
+            strokeDasharray: relationType === "sibling" ? "4 8" : undefined,
+          }
+        : isUnrelated
+          ? { ...baseStyle, opacity: 0.2 }
+          : baseStyle;
+
       return {
         id: rel.id,
         source: rel.fromUnitId,
@@ -467,19 +762,28 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
         reconnectable: true,
         selected: rel.id === selectedEdgeId,
         interactionWidth: 64,
-        zIndex: 20,
-        markerEnd: relationType === "parent" ? { type: MarkerType.ArrowClosed, color: "#4D4235" } : undefined,
+        zIndex: relationType === "parent" ? 2 : 1,
+        markerEnd:
+          relationType === "parent"
+            ? {
+                type: MarkerType.ArrowClosed,
+                color: "#4D4235",
+                width: 20,
+                height: 20,
+              }
+            : undefined,
         style,
-        data: { relationType, lane: handles.lane }
+        data: { relationType, bundleIndex, bundleTotal },
       } as Edge;
     });
-  }, [visibleRelations, positions, selectedEdgeId]);
+  }, [visibleRelations, selectedEdgeId, hoveredUnitId]);
 
   const handleNodeClick: NodeMouseHandler = (_, node) => {
     if (node.id.startsWith("gen-label-")) return;
     setSelectedUnitId(node.id);
     setFocusUnitId(node.id);
-    const firstMemberId = (unitMemberRows.get(node.id) ?? [])[0]?.memberId ?? null;
+    const firstMemberId =
+      (unitMemberRows.get(node.id) ?? [])[0]?.memberId ?? null;
     if (firstMemberId) {
       setSelectedMemberId(firstMemberId);
     }
@@ -495,11 +799,17 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
       setConnectMessage("连接失败：请从家庭单元锚点拖拽到另一个单元锚点。");
       return;
     }
-    const relationType = inferRelationType(connection);
+    // 根据两个单元的代际判断关系类型：同代=兄弟，不同代=父子
+    const sourceGen =
+      normalizedUnits.find((u) => u.id === source)?.generation ?? 99;
+    const targetGen =
+      normalizedUnits.find((u) => u.id === target)?.generation ?? 99;
+    const relationType =
+      sourceGen === targetGen ? REL_SIBLING : REL_PARENT_CHILD;
     const result = addUnitRelation({
       fromUnitId: source,
       toUnitId: target,
-      relationType
+      relationType,
     });
     if (!result.ok) {
       setConnectMessage(result.reason);
@@ -516,7 +826,7 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
     const result = reconnectUnitRelation({
       relationId: oldEdge.id,
       fromUnitId: source,
-      toUnitId: target
+      toUnitId: target,
     });
     if (!result.ok) {
       setConnectMessage(result.reason);
@@ -540,13 +850,22 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
     }
   };
 
-  const handleNodeDragStop = (_event: ReactMouseEvent<Element, MouseEvent>, node: Node) => {
+  const handleNodeDragStop = (
+    _event: ReactMouseEvent<Element, MouseEvent>,
+    node: Node,
+  ) => {
     if (viewMode !== "overview") return;
     if (node.id.startsWith("gen-label-")) return;
     const unit = visibleUnits.find((u) => u.id === node.id);
     if (!unit) return;
     const lockedY = generationYMap.get(unit.generation);
-    const nextX = resolveNonOverlapX(node.position.x, unit.id, unit.generation, visibleUnits, positions);
+    const nextX = resolveNonOverlapX(
+      node.position.x,
+      unit.id,
+      unit.generation,
+      visibleUnits,
+      positions,
+    );
     if (typeof lockedY === "number") {
       node.position = { x: nextX, y: lockedY };
     } else {
@@ -555,13 +874,22 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
     setNodePosition(`unit:${node.id}`, node.position);
   };
 
-  const handleNodeDrag = (_event: ReactMouseEvent<Element, MouseEvent>, node: Node) => {
+  const handleNodeDrag = (
+    _event: ReactMouseEvent<Element, MouseEvent>,
+    node: Node,
+  ) => {
     if (viewMode !== "overview") return;
     if (node.id.startsWith("gen-label-")) return;
     const unit = visibleUnits.find((u) => u.id === node.id);
     if (!unit) return;
     const lockedY = generationYMap.get(unit.generation);
-    const nextX = resolveNonOverlapX(node.position.x, unit.id, unit.generation, visibleUnits, positions);
+    const nextX = resolveNonOverlapX(
+      node.position.x,
+      unit.id,
+      unit.generation,
+      visibleUnits,
+      positions,
+    );
     if (typeof lockedY !== "number") {
       node.position = { ...node.position, x: nextX };
       return;
@@ -578,12 +906,16 @@ export function FamilyGraph({ readOnly = false }: FamilyGraphProps) {
     if (!reactFlowInstance || !selectedUnitId) return;
     const node = nodes.find((n) => n.id === selectedUnitId);
     if (!node) return;
-    reactFlowInstance.setCenter(node.position.x + 140, node.position.y + 70, { zoom: 0.9, duration: 250 });
+    reactFlowInstance.setCenter(node.position.x + 140, node.position.y + 70, {
+      zoom: 0.9,
+      duration: 250,
+    });
   }, [reactFlowInstance, selectedUnitId, nodes]);
 
   useEffect(() => {
     if (!selectedEdgeId) return;
-    if (visibleRelations.some((relation) => relation.id === selectedEdgeId)) return;
+    if (visibleRelations.some((relation) => relation.id === selectedEdgeId))
+      return;
     setSelectedEdgeId(null);
   }, [selectedEdgeId, visibleRelations]);
 

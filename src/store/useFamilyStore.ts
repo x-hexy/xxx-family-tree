@@ -9,19 +9,27 @@ import {
   persistRelationshipInsert,
   persistRelationshipReconnect,
   persistShareSettings,
-  uploadAvatar
+  uploadAvatar,
 } from "../lib/familyPersistence";
 import { loadUnitSnapshot } from "../lib/familyUnitPersistence";
-import type { FamilyUnit, FamilyUnitMember, UnitRelation } from "../types/familyUnit";
+import type {
+  FamilyUnit,
+  FamilyUnitMember,
+  UnitRelation,
+} from "../types/familyUnit";
 import {
   persistUnitRelationDelete,
   persistUnitRelationInsert,
   persistUnitRelationReconnect,
-  persistUnitMemberRole
+  persistUnitMemberRole,
 } from "../lib/familyUnitPersistence";
 
 type MemberInput = Omit<Member, "id">;
-type PanelMode = "view" | "create" | "create_relationship" | "delete_relationship";
+type PanelMode =
+  | "view"
+  | "create"
+  | "create_relationship"
+  | "delete_relationship";
 type ViewMode = "focus" | "paternal" | "maternal" | "overview";
 const nodePositionsStorageKey = "xy-family-tree-node-positions";
 type NodePosition = { x: number; y: number };
@@ -43,6 +51,7 @@ type FamilyState = {
   showParentChildLines: boolean;
   showSpouseLines: boolean;
   showSiblingLines: boolean;
+  filterGenerations: Set<number> | null;
   nodePositions: Record<string, NodePosition>;
   layoutRequestVersion: number;
   isHydrated: boolean;
@@ -82,7 +91,9 @@ type FamilyState = {
   }) => { ok: true } | { ok: false; reason: string };
   deleteUnitRelation: (relationId: string) => void;
   swapUnitPartners: (unitId: string) => void;
-  findAndSelectMemberByName: (keyword: string) => { ok: true } | { ok: false; reason: string };
+  findAndSelectMemberByName: (
+    keyword: string,
+  ) => { ok: true } | { ok: false; reason: string };
   setShareEnabled: (enabled: boolean) => void;
   refreshShareToken: () => string;
   isValidShareAccess: (token?: string | null) => boolean;
@@ -94,13 +105,18 @@ type FamilyState = {
     showSpouseLines?: boolean;
     showSiblingLines?: boolean;
   }) => void;
+  setFilterGenerations: (gens: Set<number> | null) => void;
   setNodePosition: (memberId: string, position: NodePosition) => void;
   setNodePositions: (positions: Record<string, NodePosition>) => void;
   triggerAutoArrange: () => void;
   updateMemberAvatar: (memberId: string, avatarUrl: string) => void;
 };
 
-function relationKey(fromMemberId: string, toMemberId: string, relationType: RelationType): string {
+function relationKey(
+  fromMemberId: string,
+  toMemberId: string,
+  relationType: RelationType,
+): string {
   if (relationType === "spouse" || relationType === "sibling") {
     const [a, b] = [fromMemberId, toMemberId].sort();
     return `${relationType}:${a}:${b}`;
@@ -109,14 +125,20 @@ function relationKey(fromMemberId: string, toMemberId: string, relationType: Rel
 }
 
 function generateShareToken(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID().replace(/-/g, "").slice(0, 16);
   }
   return Math.random().toString(36).slice(2, 18);
 }
 
 function generateUnitRelationId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return `ur_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
   }
   return `ur_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -136,7 +158,10 @@ function loadNodePositions(): Record<string, NodePosition> {
 
 function saveNodePositions(positions: Record<string, NodePosition>): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(nodePositionsStorageKey, JSON.stringify(positions));
+  window.localStorage.setItem(
+    nodePositionsStorageKey,
+    JSON.stringify(positions),
+  );
 }
 
 export const useFamilyStore = create<FamilyState>((set, get) => ({
@@ -156,6 +181,7 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   showParentChildLines: true,
   showSpouseLines: true,
   showSiblingLines: false,
+  filterGenerations: null,
   nodePositions: loadNodePositions(),
   layoutRequestVersion: 0,
   isHydrated: false,
@@ -167,12 +193,16 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     try {
       const [legacySnapshot, unitSnapshot] = await Promise.all([
         loadSnapshot(),
-        loadUnitSnapshot().catch(() => null)
+        loadUnitSnapshot().catch(() => null),
       ]);
       const focusCandidate =
-        legacySnapshot.members.find((member) => member.name === "我")?.id ?? legacySnapshot.members[0]?.id ?? null;
+        legacySnapshot.members.find((member) => member.name === "我")?.id ??
+        legacySnapshot.members[0]?.id ??
+        null;
       const focusUnitCandidate =
-        unitSnapshot?.units.find((unit) => unit.name.includes("我"))?.id ?? unitSnapshot?.units[0]?.id ?? null;
+        unitSnapshot?.units.find((unit) => unit.name.includes("我"))?.id ??
+        unitSnapshot?.units[0]?.id ??
+        null;
       set({
         members: legacySnapshot.members,
         relationships: legacySnapshot.relationships,
@@ -180,7 +210,9 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
         unitMembers: unitSnapshot?.unitMembers ?? [],
         unitRelations:
           unitSnapshot?.unitRelations.filter(
-            (relation) => !relation.id.startsWith("ur_pc_") && !relation.id.startsWith("ur_sb_")
+            (relation) =>
+              !relation.id.startsWith("ur_pc_") &&
+              !relation.id.startsWith("ur_sb_"),
           ) ?? [],
         shareToken: unitSnapshot?.shareToken ?? legacySnapshot.shareToken,
         shareEnabled: unitSnapshot?.shareEnabled ?? legacySnapshot.shareEnabled,
@@ -189,13 +221,13 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
         nodePositions: loadNodePositions(),
         isHydrated: true,
         hydrationSource: legacySnapshot.source,
-        syncError: null
+        syncError: null,
       });
     } catch (error) {
       set({
         isHydrated: true,
         hydrationSource: "local",
-        syncError: error instanceof Error ? error.message : "加载数据失败"
+        syncError: error instanceof Error ? error.message : "加载数据失败",
       });
     }
   },
@@ -214,11 +246,13 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     set((state) => ({
       members: [...state.members, member],
       selectedMemberId: newId,
-      panelMode: "view"
+      panelMode: "view",
     }));
 
     void persistMemberInsert(member).catch((error) => {
-      set({ syncError: error instanceof Error ? error.message : "成员新增同步失败" });
+      set({
+        syncError: error instanceof Error ? error.message : "成员新增同步失败",
+      });
     });
     return newId;
   },
@@ -226,12 +260,14 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   updateMember: (memberId, patch) => {
     set((state) => ({
       members: state.members.map((member) =>
-        member.id === memberId ? { ...member, ...patch } : member
-      )
+        member.id === memberId ? { ...member, ...patch } : member,
+      ),
     }));
 
     void persistMemberUpdate(memberId, patch).catch((error) => {
-      set({ syncError: error instanceof Error ? error.message : "成员更新同步失败" });
+      set({
+        syncError: error instanceof Error ? error.message : "成员更新同步失败",
+      });
     });
   },
 
@@ -239,25 +275,32 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     set((state) => ({
       nodePositions: (() => {
         const next = Object.fromEntries(
-          Object.entries(state.nodePositions).filter(([key]) => key !== memberId)
+          Object.entries(state.nodePositions).filter(
+            ([key]) => key !== memberId,
+          ),
         );
         saveNodePositions(next);
         return next;
       })(),
       members: state.members.filter((member) => member.id !== memberId),
       relationships: state.relationships.filter(
-        (relation) => relation.fromMemberId !== memberId && relation.toMemberId !== memberId
+        (relation) =>
+          relation.fromMemberId !== memberId &&
+          relation.toMemberId !== memberId,
       ),
       focusMemberId:
         state.focusMemberId === memberId
-          ? state.members.find((member) => member.id !== memberId)?.id ?? null
+          ? (state.members.find((member) => member.id !== memberId)?.id ?? null)
           : state.focusMemberId,
-      selectedMemberId: state.selectedMemberId === memberId ? null : state.selectedMemberId,
-      panelMode: "view"
+      selectedMemberId:
+        state.selectedMemberId === memberId ? null : state.selectedMemberId,
+      panelMode: "view",
     }));
 
     void persistMemberDelete(memberId).catch((error) => {
-      set({ syncError: error instanceof Error ? error.message : "成员删除同步失败" });
+      set({
+        syncError: error instanceof Error ? error.message : "成员删除同步失败",
+      });
     });
   },
 
@@ -270,15 +313,19 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
       id: `r${Date.now()}`,
       fromMemberId,
       toMemberId,
-      relationType
+      relationType,
     };
     let isDuplicated = false;
 
     set((state) => {
       const existing = new Set(
         state.relationships.map((relation) =>
-          relationKey(relation.fromMemberId, relation.toMemberId, relation.relationType)
-        )
+          relationKey(
+            relation.fromMemberId,
+            relation.toMemberId,
+            relation.relationType,
+          ),
+        ),
       );
       const nextKey = relationKey(fromMemberId, toMemberId, relationType);
       if (existing.has(nextKey)) {
@@ -288,7 +335,7 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
       return {
         ...state,
         relationships: [...state.relationships, newRelation],
-        panelMode: "view"
+        panelMode: "view",
       };
     });
 
@@ -297,7 +344,9 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     }
 
     void persistRelationshipInsert(newRelation).catch((error) => {
-      set({ syncError: error instanceof Error ? error.message : "关系创建同步失败" });
+      set({
+        syncError: error instanceof Error ? error.message : "关系创建同步失败",
+      });
     });
     return { ok: true };
   },
@@ -307,7 +356,9 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
       return { ok: false, reason: "不能连接到同一成员。" };
     }
 
-    const target = get().relationships.find((relation) => relation.id === relationshipId);
+    const target = get().relationships.find(
+      (relation) => relation.id === relationshipId,
+    );
     if (!target) {
       return { ok: false, reason: "关系不存在。" };
     }
@@ -315,7 +366,13 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     const nextKey = relationKey(fromMemberId, toMemberId, target.relationType);
     const duplicated = get().relationships.some((relation) => {
       if (relation.id === relationshipId) return false;
-      return relationKey(relation.fromMemberId, relation.toMemberId, relation.relationType) === nextKey;
+      return (
+        relationKey(
+          relation.fromMemberId,
+          relation.toMemberId,
+          relation.relationType,
+        ) === nextKey
+      );
     });
     if (duplicated) {
       return { ok: false, reason: "目标关系已存在。" };
@@ -323,12 +380,20 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
 
     set((state) => ({
       relationships: state.relationships.map((relation) =>
-        relation.id === relationshipId ? { ...relation, fromMemberId, toMemberId } : relation
-      )
+        relation.id === relationshipId
+          ? { ...relation, fromMemberId, toMemberId }
+          : relation,
+      ),
     }));
 
-    void persistRelationshipReconnect(relationshipId, fromMemberId, toMemberId).catch((error) => {
-      set({ syncError: error instanceof Error ? error.message : "关系重连同步失败" });
+    void persistRelationshipReconnect(
+      relationshipId,
+      fromMemberId,
+      toMemberId,
+    ).catch((error) => {
+      set({
+        syncError: error instanceof Error ? error.message : "关系重连同步失败",
+      });
     });
 
     return { ok: true };
@@ -336,12 +401,16 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
 
   deleteRelationship: (relationshipId) => {
     set((state) => ({
-      relationships: state.relationships.filter((relation) => relation.id !== relationshipId),
-      panelMode: "view"
+      relationships: state.relationships.filter(
+        (relation) => relation.id !== relationshipId,
+      ),
+      panelMode: "view",
     }));
 
     void persistRelationshipDelete(relationshipId).catch((error) => {
-      set({ syncError: error instanceof Error ? error.message : "关系删除同步失败" });
+      set({
+        syncError: error instanceof Error ? error.message : "关系删除同步失败",
+      });
     });
   },
 
@@ -359,27 +428,32 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
       id: generateUnitRelationId(),
       fromUnitId: normalized.fromUnitId,
       toUnitId: normalized.toUnitId,
-      relationType
+      relationType,
     };
 
     const duplicated = get().unitRelations.some(
       (r) =>
         r.fromUnitId === relation.fromUnitId &&
         r.toUnitId === relation.toUnitId &&
-        r.relationType === relation.relationType
+        r.relationType === relation.relationType,
     );
     if (duplicated) return { ok: false, reason: "该家庭单元关系已存在。" };
 
     set((state) => ({ unitRelations: [...state.unitRelations, relation] }));
     void persistUnitRelationInsert(relation).catch((error) => {
       set((state) => ({
-        unitRelations: state.unitRelations.filter((item) => item.id !== relation.id)
+        unitRelations: state.unitRelations.filter(
+          (item) => item.id !== relation.id,
+        ),
       }));
       const code = (error as { code?: string } | null)?.code;
       if (code === "23505") {
         return;
       }
-      set({ syncError: error instanceof Error ? error.message : "单元关系创建同步失败" });
+      set({
+        syncError:
+          error instanceof Error ? error.message : "单元关系创建同步失败",
+      });
     });
     return { ok: true };
   },
@@ -408,25 +482,47 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
 
     set((state) => ({
       unitRelations: state.unitRelations.map((r) =>
-        r.id === relationId ? { ...r, fromUnitId: normalized.fromUnitId, toUnitId: normalized.toUnitId } : r
-      )
+        r.id === relationId
+          ? {
+              ...r,
+              fromUnitId: normalized.fromUnitId,
+              toUnitId: normalized.toUnitId,
+            }
+          : r,
+      ),
     }));
-    void persistUnitRelationReconnect(relationId, normalized.fromUnitId, normalized.toUnitId).catch((error) => {
-      set({ syncError: error instanceof Error ? error.message : "单元关系重连同步失败" });
+    void persistUnitRelationReconnect(
+      relationId,
+      normalized.fromUnitId,
+      normalized.toUnitId,
+    ).catch((error) => {
+      set({
+        syncError:
+          error instanceof Error ? error.message : "单元关系重连同步失败",
+      });
     });
     return { ok: true };
   },
 
   deleteUnitRelation: (relationId) => {
-    set((state) => ({ unitRelations: state.unitRelations.filter((r) => r.id !== relationId) }));
+    set((state) => ({
+      unitRelations: state.unitRelations.filter((r) => r.id !== relationId),
+    }));
     void persistUnitRelationDelete(relationId).catch((error) => {
-      set({ syncError: error instanceof Error ? error.message : "单元关系删除同步失败" });
+      set({
+        syncError:
+          error instanceof Error ? error.message : "单元关系删除同步失败",
+      });
     });
   },
 
   swapUnitPartners: (unitId) => {
-    const rows = get().unitMembers
-      .filter((row) => row.unitId === unitId && (row.role === "partner1" || row.role === "partner2"))
+    const rows = get()
+      .unitMembers.filter(
+        (row) =>
+          row.unitId === unitId &&
+          (row.role === "partner1" || row.role === "partner2"),
+      )
       .slice(0, 2);
     if (rows.length < 2) return;
     const partner1 = rows.find((row) => row.role === "partner1");
@@ -435,17 +531,22 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
 
     set((state) => ({
       unitMembers: state.unitMembers.map((row) => {
-        if (row.memberId === partner1.memberId) return { ...row, role: "partner2" };
-        if (row.memberId === partner2.memberId) return { ...row, role: "partner1" };
+        if (row.memberId === partner1.memberId)
+          return { ...row, role: "partner2" };
+        if (row.memberId === partner2.memberId)
+          return { ...row, role: "partner1" };
         return row;
-      })
+      }),
     }));
 
     void Promise.all([
       persistUnitMemberRole(partner1.memberId, "partner2"),
-      persistUnitMemberRole(partner2.memberId, "partner1")
+      persistUnitMemberRole(partner2.memberId, "partner1"),
     ]).catch((error) => {
-      set({ syncError: error instanceof Error ? error.message : "夫妻位置互换同步失败" });
+      set({
+        syncError:
+          error instanceof Error ? error.message : "夫妻位置互换同步失败",
+      });
     });
   },
 
@@ -456,18 +557,21 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     let foundId: string | null = null;
     set((state) => {
       const exact = state.members.find((member) => member.name === query);
-      const partial = state.members.find((member) => member.name.includes(query));
+      const partial = state.members.find((member) =>
+        member.name.includes(query),
+      );
       const target = exact ?? partial ?? null;
       if (!target) return state;
       foundId = target.id;
       const matchedUnitId =
-        state.unitMembers.find((entry) => entry.memberId === target.id)?.unitId ?? null;
+        state.unitMembers.find((entry) => entry.memberId === target.id)
+          ?.unitId ?? null;
       return {
         ...state,
         selectedMemberId: target.id,
         selectedUnitId: matchedUnitId,
         focusUnitId: matchedUnitId ?? state.focusUnitId,
-        panelMode: "view"
+        panelMode: "view",
       };
     });
 
@@ -478,7 +582,10 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   setShareEnabled: (enabled) =>
     set((state) => {
       void persistShareSettings(state.shareToken, enabled).catch((error) => {
-        set({ syncError: error instanceof Error ? error.message : "分享配置同步失败" });
+        set({
+          syncError:
+            error instanceof Error ? error.message : "分享配置同步失败",
+        });
       });
       return { shareEnabled: enabled };
     }),
@@ -487,24 +594,31 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     const token = generateShareToken();
     set((state) => {
       void persistShareSettings(token, state.shareEnabled).catch((error) => {
-        set({ syncError: error instanceof Error ? error.message : "分享 Token 同步失败" });
+        set({
+          syncError:
+            error instanceof Error ? error.message : "分享 Token 同步失败",
+        });
       });
       return { shareToken: token };
     });
     return token;
   },
 
-  isValidShareAccess: (token) => !!token && get().shareEnabled && token === get().shareToken,
+  isValidShareAccess: (token) =>
+    !!token && get().shareEnabled && token === get().shareToken,
 
   setViewMode: (mode) => set({ viewMode: mode }),
   setFocusMemberId: (memberId) => set({ focusMemberId: memberId }),
   setFocusUnitId: (unitId) => set({ focusUnitId: unitId }),
   setLineVisibility: (patch) =>
     set((state) => ({
-      showParentChildLines: patch.showParentChildLines ?? state.showParentChildLines,
+      showParentChildLines:
+        patch.showParentChildLines ?? state.showParentChildLines,
       showSpouseLines: patch.showSpouseLines ?? state.showSpouseLines,
-      showSiblingLines: patch.showSiblingLines ?? state.showSiblingLines
+      showSiblingLines: patch.showSiblingLines ?? state.showSiblingLines,
     })),
+
+  setFilterGenerations: (gens) => set({ filterGenerations: gens }),
 
   setNodePosition: (memberId, position) =>
     set((state) => {
@@ -519,13 +633,14 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
       return { nodePositions: positions };
     }),
 
-  triggerAutoArrange: () => set((state) => ({ layoutRequestVersion: state.layoutRequestVersion + 1 })),
+  triggerAutoArrange: () =>
+    set((state) => ({ layoutRequestVersion: state.layoutRequestVersion + 1 })),
 
   updateMemberAvatar: (memberId, avatarUrl) => {
     set((state) => ({
       members: state.members.map((member) =>
-        member.id === memberId ? { ...member, avatarUrl } : member
-      )
+        member.id === memberId ? { ...member, avatarUrl } : member,
+      ),
     }));
 
     void (async () => {
@@ -535,8 +650,10 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
         if (persistedUrl !== avatarUrl) {
           set((state) => ({
             members: state.members.map((member) =>
-              member.id === memberId ? { ...member, avatarUrl: persistedUrl } : member
-            )
+              member.id === memberId
+                ? { ...member, avatarUrl: persistedUrl }
+                : member,
+            ),
           }));
         }
       } catch (error) {
@@ -545,15 +662,17 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
           await persistMemberUpdate(memberId, { avatarUrl });
           set({
             syncError:
-              "头像未写入对象存储，已降级保存到数据库。请稍后修复 Storage Policy。"
+              "头像未写入对象存储，已降级保存到数据库。请稍后修复 Storage Policy。",
           });
         } catch (persistError) {
           set({
             syncError:
-              persistError instanceof Error ? persistError.message : "头像上传与降级保存都失败"
+              persistError instanceof Error
+                ? persistError.message
+                : "头像上传与降级保存都失败",
           });
         }
       }
     })();
-  }
+  },
 }));
