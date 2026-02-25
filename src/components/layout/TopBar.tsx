@@ -1,5 +1,7 @@
 import { useState, type KeyboardEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { useFamilyStore } from "../../store/useFamilyStore";
+import { signOut } from "../../lib/auth";
 import { ShareDialog } from "./ShareDialog";
 import { ExportDialog } from "./ExportDialog";
 
@@ -8,6 +10,7 @@ type TopBarProps = {
 };
 
 export function TopBar({ readOnly = false }: TopBarProps) {
+  const navigate = useNavigate();
   const [keyword, setKeyword] = useState("");
   const [message, setMessage] = useState("");
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -120,6 +123,16 @@ export function TopBar({ readOnly = false }: TopBarProps) {
                 onClick={() => setShareDialogOpen(true)}
               >
                 分享链接
+              </button>
+              <button
+                className="rounded border border-bronze/40 px-3 py-1 text-sm text-soot transition hover:text-cinnabar"
+                onClick={() => {
+                  void signOut().then(() =>
+                    navigate("/login", { replace: true }),
+                  );
+                }}
+              >
+                退出登录
               </button>
             </>
           )}

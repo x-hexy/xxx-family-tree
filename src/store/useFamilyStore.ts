@@ -1,17 +1,19 @@
 import { create } from "zustand";
 import type { Member, RelationType, Relationship } from "../types/family";
 import {
-  loadSnapshot,
   persistMemberDelete,
   persistMemberInsert,
   persistMemberUpdate,
   persistRelationshipDelete,
   persistRelationshipInsert,
   persistRelationshipReconnect,
-  persistShareSettings,
   uploadAvatar,
 } from "../lib/familyPersistence";
 import { loadUnitSnapshot } from "../lib/familyUnitPersistence";
+import {
+  getOrCreateShareSettings,
+  updateShareSettings,
+} from "../lib/treePersistence";
 import type {
   FamilyUnit,
   FamilyUnitMember,
@@ -35,6 +37,7 @@ const nodePositionsStorageKey = "xy-family-tree-node-positions";
 type NodePosition = { x: number; y: number };
 
 type FamilyState = {
+  treeId: string | null;
   members: Member[];
   relationships: Relationship[];
   units: FamilyUnit[];
@@ -57,7 +60,7 @@ type FamilyState = {
   isHydrated: boolean;
   hydrationSource: "supabase" | "local" | null;
   syncError: string | null;
-  initializeData: () => Promise<void>;
+  initializeData: (treeId: string) => Promise<void>;
   setSelectedMemberId: (id: string | null) => void;
   setSelectedUnitId: (id: string | null) => void;
   startCreateMember: () => void;
@@ -165,6 +168,7 @@ function saveNodePositions(positions: Record<string, NodePosition>): void {
 }
 
 export const useFamilyStore = create<FamilyState>((set, get) => ({
+  treeId: null,
   members: [],
   relationships: [],
   units: [],
@@ -188,39 +192,38 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   hydrationSource: null,
   syncError: null,
 
-  initializeData: async () => {
-    if (get().isHydrated) return;
+  initializeData: async (treeId: string) => {
+    set({ isHydrated: false, treeId: null, syncError: null });
     try {
-      const [legacySnapshot, unitSnapshot] = await Promise.all([
-        loadSnapshot(),
-        loadUnitSnapshot().catch(() => null),
+      const [snapshot, shareSettings] = await Promise.all([
+        loadUnitSnapshot(treeId),
+        getOrCreateShareSettings(treeId).catch(() => null),
       ]);
-      const focusCandidate =
-        legacySnapshot.members.find((member) => member.name === "我")?.id ??
-        legacySnapshot.members[0]?.id ??
-        null;
       const focusUnitCandidate =
-        unitSnapshot?.units.find((unit) => unit.name.includes("我"))?.id ??
-        unitSnapshot?.units[0]?.id ??
+        snapshot.units.find((unit) => unit.name.includes("我"))?.id ??
+        snapshot.units[0]?.id ??
         null;
       set({
-        members: legacySnapshot.members,
-        relationships: legacySnapshot.relationships,
-        units: unitSnapshot?.units ?? [],
-        unitMembers: unitSnapshot?.unitMembers ?? [],
-        unitRelations:
-          unitSnapshot?.unitRelations.filter(
-            (relation) =>
-              !relation.id.startsWith("ur_pc_") &&
-              !relation.id.startsWith("ur_sb_"),
-          ) ?? [],
-        shareToken: unitSnapshot?.shareToken ?? legacySnapshot.shareToken,
-        shareEnabled: unitSnapshot?.shareEnabled ?? legacySnapshot.shareEnabled,
-        focusMemberId: focusCandidate,
+        treeId,
+        members: snapshot.members,
+        relationships: [],
+        units: snapshot.units,
+        unitMembers: snapshot.unitMembers,
+        unitRelations: snapshot.unitRelations.filter(
+          (relation) =>
+            !relation.id.startsWith("ur_pc_") &&
+            !relation.id.startsWith("ur_sb_"),
+        ),
+        shareToken: shareSettings?.token ?? snapshot.shareToken,
+        shareEnabled: shareSettings?.enabled ?? snapshot.shareEnabled,
+        focusMemberId:
+          snapshot.members.find((m) => m.name === "我")?.id ??
+          snapshot.members[0]?.id ??
+          null,
         focusUnitId: focusUnitCandidate,
         nodePositions: loadNodePositions(),
         isHydrated: true,
-        hydrationSource: legacySnapshot.source,
+        hydrationSource: "supabase",
         syncError: null,
       });
     } catch (error) {
@@ -241,6 +244,7 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   cancelRelationshipMode: () => set({ panelMode: "view" }),
 
   addMember: (input) => {
+    const treeId = get().treeId ?? "";
     const newId = `m${Date.now()}`;
     const member: Member = { id: newId, ...input };
     set((state) => ({
@@ -249,7 +253,7 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
       panelMode: "view",
     }));
 
-    void persistMemberInsert(member).catch((error) => {
+    void persistMemberInsert(member, treeId).catch((error) => {
       set({
         syncError: error instanceof Error ? error.message : "成员新增同步失败",
       });
@@ -579,28 +583,31 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     return { ok: true };
   },
 
-  setShareEnabled: (enabled) =>
-    set((state) => {
-      void persistShareSettings(state.shareToken, enabled).catch((error) => {
+  setShareEnabled: (enabled) => {
+    const treeId = get().treeId;
+    if (treeId) {
+      void updateShareSettings(treeId, { enabled }).catch((error) => {
         set({
           syncError:
             error instanceof Error ? error.message : "分享配置同步失败",
         });
       });
-      return { shareEnabled: enabled };
-    }),
+    }
+    set({ shareEnabled: enabled });
+  },
 
   refreshShareToken: () => {
+    const treeId = get().treeId;
     const token = generateShareToken();
-    set((state) => {
-      void persistShareSettings(token, state.shareEnabled).catch((error) => {
+    if (treeId) {
+      void updateShareSettings(treeId, { token }).catch((error) => {
         set({
           syncError:
             error instanceof Error ? error.message : "分享 Token 同步失败",
         });
       });
-      return { shareToken: token };
-    });
+    }
+    set({ shareToken: token });
     return token;
   },
 
@@ -637,6 +644,7 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     set((state) => ({ layoutRequestVersion: state.layoutRequestVersion + 1 })),
 
   updateMemberAvatar: (memberId, avatarUrl) => {
+    const treeId = get().treeId ?? undefined;
     set((state) => ({
       members: state.members.map((member) =>
         member.id === memberId ? { ...member, avatarUrl } : member,
@@ -645,7 +653,7 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
 
     void (async () => {
       try {
-        const persistedUrl = await uploadAvatar(memberId, avatarUrl);
+        const persistedUrl = await uploadAvatar(memberId, avatarUrl, treeId);
         await persistMemberUpdate(memberId, { avatarUrl: persistedUrl });
         if (persistedUrl !== avatarUrl) {
           set((state) => ({

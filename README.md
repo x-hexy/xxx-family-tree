@@ -1,116 +1,199 @@
-﻿# XY Family Tree
+# 家族图谱 · Family Tree
 
-一个基于 Web 的家族图谱应用，聚焦“家族单元（夫妻卡/单人卡）”展示与编辑，帮助家人快速理解人物与关系。
+> 免下载 App，5 分钟建好你的家谱，一键分享给全家人。
 
-## Current Status
+一个基于 Web 的在线家谱应用。以"家庭单元（夫妻卡 / 单人卡）"为核心节点，帮助家人快速梳理人物与世代关系，并通过分享链接让亲友只读查看。
 
-当前主线实现已切换到 **V2 家庭单元模型**：
-- 图谱节点：家庭单元卡（单人卡 / 夫妻双人卡）
-- 图谱连线：单元到单元关系（`parent_child` / `sibling`）
-- 支持自由建线、删线、重连端点
-- 同代拖拽锁定同一水平线，并具备防重叠
+---
 
-## Key Features
+## 功能概览
 
-- 人物信息管理（姓名、代际、头像等）
-- 单元卡展示与交互
-  - 点击头像选中个人
-  - 夫妻卡自动按男左女右排序
-  - 仅上下两端锚点，简化连线操作
-- 单元关系编辑
-  - 创建关系线（自动推断 parent_child / sibling）
-  - 删除关系线
-  - 重连关系线端点
-- 智能布局
-  - 基于子树宽度的自动布局算法
-  - 同行碰撞检测与自动避让
-  - 一键"自动整理"回到最优布局
-  - 全景模式：父系左排、母系右排
-- 视图模式
-  - 焦点树（2 跳邻域）
-  - 父系（爷爷奶奶分支 + 跨分支连线）
-  - 母系（外公外婆分支 + 跨分支连线）
-  - 全景（全量节点，支持拖拽持久化）
-- 右侧编辑面板可收起展开
-- 搜索定位
-- 只读分享链接
-- 导出 PNG / PDF
-- 卷轴风格 UI（代际标签、世代条带）
+### 核心功能
 
-## Tech Stack
+| 功能 | 说明 |
+|------|------|
+| **注册 / 登录** | 邮箱 + 密码，注册后自动创建专属家谱树 |
+| **家庭单元编辑** | 单人卡 / 夫妻卡，夫妻自动男左女右排列 |
+| **关系线管理** | 自由创建父子、兄弟关系线；支持删除与端点重连 |
+| **头像上传** | 即时预览，持久化到 Supabase Storage |
+| **智能布局** | 基于子树宽度自动排版，同代防重叠，一键整理 |
+| **多视图模式** | 焦点树 · 父系 · 母系 · 全景 |
+| **只读分享链接** | 生成专属链接，访客无需注册即可查看 |
+| **导出图谱** | 支持导出 PNG / PDF |
 
-- React + TypeScript + Vite
-- Zustand
-- React Flow (`@xyflow/react`)
-- Tailwind CSS
-- Supabase (Postgres + Storage)
+### 视图模式
 
-## Project Structure
+- **焦点树** — 以选中单元为中心，展示 2 跳邻域
+- **父系** — 定位爷爷奶奶分支，向下展开
+- **母系** — 定位外公外婆分支，向下展开
+- **全景** — 展示全量节点，支持自由拖拽持久化
 
-```text
-src/
-  components/
-    graph/               # 图谱节点/连线/交互
-    layout/              # 顶部栏、左右面板、弹窗
-  lib/                   # Supabase 持久化
-  pages/                 # 编辑页、只读页
-  store/                 # Zustand 状态管理
-  types/                 # 类型定义（含 familyUnit）
-supabase/
-  schema.sql             # V1 表结构
-  schema_v2.sql          # V2 家庭单元表结构
-  migration_v1_to_v2.sql # V1 -> V2 迁移
-  cleanup_auto_relations.sql
-  storage_policies_avatars.sql
-```
+---
 
-## Quick Start
+## 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| 前端框架 | React 18 + TypeScript + Vite |
+| 状态管理 | Zustand |
+| 图形渲染 | React Flow (`@xyflow/react`) |
+| 样式 | Tailwind CSS |
+| 后端 / 数据库 | Supabase (Auth + Postgres + Storage) |
+| 部署 | Vercel |
+
+---
+
+## 快速开始（本地开发）
+
+### 1. 克隆与安装依赖
 
 ```bash
+git clone https://github.com/x-hexy/xxx-family-tree.git
+cd xxx-family-tree
 npm install
+```
+
+### 2. 配置环境变量
+
+创建 `.env.local` 文件：
+
+```bash
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-public-key
+```
+
+> 仅使用 `anon` public key，**不要**将 `service_role` key 放入前端。
+
+### 3. 配置 Supabase 数据库
+
+在 Supabase SQL Editor 依序执行：
+
+```
+supabase/schema.sql                  # 基础成员与关系表
+supabase/schema_v2.sql               # V2 家庭单元表结构
+supabase/schema_multiuser.sql        # 多用户：trees 表、RLS 策略、share token 函数
+supabase/storage_policies_avatars.sql # 头像存储策略（按 tree_id 隔离）
+```
+
+若数据库中已有历史数据，额外执行：
+
+```
+supabase/migration_to_multiuser.sql  # 将历史数据归属到第一个注册账号
+```
+
+### 4. 启动开发服务器
+
+```bash
 npm run dev
 ```
 
-默认地址：
-- `http://localhost:5173/`（编辑）
-- `http://localhost:5173/view/:token`（只读）
+访问地址：
 
-## Supabase Setup
+- `http://localhost:5173/login` — 登录 / 注册
+- `http://localhost:5173/` — 编辑页（需登录）
+- `http://localhost:5173/view/:token` — 只读分享页（无需登录）
 
-1. 在 Supabase 创建项目。
-2. 执行基础表结构：`supabase/schema.sql`
-3. 执行 V2 表结构：`supabase/schema_v2.sql`
-4. 执行迁移脚本：`supabase/migration_v1_to_v2.sql`
-5. （可选）清理历史自动线：`supabase/cleanup_auto_relations.sql`
-6. 执行头像 bucket 策略：`supabase/storage_policies_avatars.sql`
-7. 配置 `.env`：
+---
 
-```bash
-VITE_SUPABASE_URL=your_supabase_project_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+## 项目结构
+
+```
+.
+├── docs/                           # 产品与技术文档
+│   ├── requirements.md             # 功能需求
+│   ├── system_requirements.md      # 系统需求
+│   ├── architecture.md             # 架构设计
+│   ├── design.md                   # UI/UX 设计规范
+│   ├── view_specification.md       # 视图规范
+│   ├── information_architecture.md
+│   ├── wireframes.md
+│   ├── traceability_matrix.md
+│   └── implementation_traceability.md
+├── src/
+│   ├── components/
+│   │   ├── graph/                  # 图谱节点 / 连线 / 交互
+│   │   └── layout/                 # 顶栏、左右面板、弹窗
+│   ├── hooks/
+│   │   └── useAuthGuard.ts         # 路由登录守卫
+│   ├── lib/
+│   │   ├── auth.ts                 # Supabase Auth 封装
+│   │   ├── supabase.ts             # Supabase 客户端
+│   │   ├── treePersistence.ts      # trees / share_settings 读写
+│   │   ├── familyUnitPersistence.ts # V2 单元模型读写
+│   │   └── familyPersistence.ts    # 成员 / 头像持久化
+│   ├── pages/
+│   │   ├── LoginPage.tsx           # 登录 / 注册页
+│   │   ├── EditorPage.tsx          # 编辑页（需登录）
+│   │   ├── ReadOnlyPage.tsx        # 只读分享页
+│   │   └── NotFoundPage.tsx        # 404 页
+│   ├── store/
+│   │   └── useFamilyStore.ts       # Zustand 全局状态
+│   └── types/                      # TypeScript 类型定义
+├── supabase/
+│   ├── schema.sql                  # V1 基础表
+│   ├── schema_v2.sql               # V2 家庭单元表
+│   ├── schema_multiuser.sql        # 多用户 trees 表 + RLS
+│   ├── migration_to_multiuser.sql  # 历史数据迁移
+│   └── storage_policies_avatars.sql
+├── index.html
+├── vercel.json                     # Vercel SPA 路由配置
+└── package.json
 ```
 
-## Avatar Persistence Note
+---
 
-头像保存策略：
-- 优先上传到 Supabase Storage `avatars` bucket
-- 若上传失败，会降级将 data URL 保存到 `members.avatar_url`
-- 因此刷新页面后头像不会丢失
+## 数据架构
 
-## Build
+```
+auth.users  (Supabase Auth)
+    │
+    └── trees (每用户一棵家谱树)
+            │
+            ├── members              (家族成员)
+            ├── family_units         (家庭单元：单人卡 / 夫妻卡)
+            │       └── family_unit_members  (成员归属单元)
+            ├── unit_relations       (单元间关系线)
+            └── share_settings       (分享链接 token)
+```
+
+### 访问控制（RLS）
+
+| 路径 | 角色 | 权限 |
+|------|------|------|
+| `/` 编辑页 | 已登录用户 | 读写自己的树 |
+| `/view/:token` 分享页 | 任何人（含匿名） | 只读对应树 |
+| 其他用户数据 | 任何人 | 无权访问 |
+
+---
+
+## 构建与部署
 
 ```bash
+# 构建生产包
 npm run build
+
+# 本地预览生产包
 npm run preview
 ```
 
-## Documentation
+### Vercel 部署
 
-- `requirements.md`
-- `system_requirements.md`
-- `architecture.md`
-- `design.md`
-- `information_architecture.md`
-- `view_specification.md`
-- `traceability_matrix.md`
-- `implementation_traceability.md`
+1. 在 Vercel 中导入此 GitHub 仓库
+2. 设置环境变量：`VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`
+3. 推送到 `master` 自动触发部署
+
+---
+
+## 文档
+
+详细产品与技术文档位于 [`docs/`](docs/) 目录：
+
+- [功能需求](docs/requirements.md)
+- [系统需求](docs/system_requirements.md)
+- [架构设计](docs/architecture.md)
+- [UI/UX 设计规范](docs/design.md)
+- [视图规范](docs/view_specification.md)
+- [信息架构](docs/information_architecture.md)
+- [线框图](docs/wireframes.md)
+- [需求追溯矩阵](docs/traceability_matrix.md)
+- [实现追溯](docs/implementation_traceability.md)

@@ -1,19 +1,32 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TopBar } from "../components/layout/TopBar";
 import { LeftToolbox } from "../components/layout/LeftToolbox";
 import { RightPanel } from "../components/layout/RightPanel";
 import { FamilyGraph } from "../components/graph/FamilyGraph";
 import { useFamilyStore } from "../store/useFamilyStore";
+import { useAuthGuard } from "../hooks/useAuthGuard";
+import { getOrCreateTree } from "../lib/treePersistence";
 
 export function EditorPage() {
+  const authState = useAuthGuard();
   const isHydrated = useFamilyStore((s) => s.isHydrated);
   const syncError = useFamilyStore((s) => s.syncError);
+  const initializeData = useFamilyStore((s) => s.initializeData);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
 
-  if (!isHydrated) {
+  useEffect(() => {
+    if (authState.status !== "authenticated") return;
+    void getOrCreateTree(authState.userId).then((tree) =>
+      initializeData(tree.id),
+    );
+  }, [authState, initializeData]);
+
+  if (authState.status === "loading" || !isHydrated) {
     return (
       <main className="relative z-[1] flex h-screen items-center justify-center bg-parchment text-ink">
-        <div className="scroll-frame rounded-md bg-[#f8f2e3] px-6 py-4 text-sm text-soot">正在加载家谱数据...</div>
+        <div className="scroll-frame rounded-md bg-[#f8f2e3] px-6 py-4 text-sm text-soot">
+          正在加载家谱数据...
+        </div>
       </main>
     );
   }

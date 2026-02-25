@@ -2,16 +2,16 @@ import { Navigate, createBrowserRouter } from "react-router-dom";
 import { EditorPage } from "./pages/EditorPage";
 import { ReadOnlyPage } from "./pages/ReadOnlyPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
-import { PasswordGate } from "./components/layout/PasswordGate";
+import { LoginPage } from "./pages/LoginPage";
 
 export const router = createBrowserRouter([
   {
+    path: "/login",
+    element: <LoginPage />,
+  },
+  {
     path: "/",
-    element: (
-      <PasswordGate>
-        <EditorPage />
-      </PasswordGate>
-    ),
+    element: <EditorPage />,
   },
   {
     path: "/view/:token",
