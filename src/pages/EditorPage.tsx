@@ -3,6 +3,7 @@ import { TopBar } from "../components/layout/TopBar";
 import { LeftToolbox } from "../components/layout/LeftToolbox";
 import { RightPanel } from "../components/layout/RightPanel";
 import { FamilyGraph } from "../components/graph/FamilyGraph";
+import { TemplatePickerModal } from "../components/layout/TemplatePickerModal";
 import { useFamilyStore } from "../store/useFamilyStore";
 import { useAuthGuard } from "../hooks/useAuthGuard";
 import { getOrCreateTree } from "../lib/treePersistence";
@@ -12,7 +13,11 @@ export function EditorPage() {
   const isHydrated = useFamilyStore((s) => s.isHydrated);
   const syncError = useFamilyStore((s) => s.syncError);
   const initializeData = useFamilyStore((s) => s.initializeData);
+  const units = useFamilyStore((s) => s.units);
+  const treeId = useFamilyStore((s) => s.treeId);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  // null = not yet decided; true = show picker; false = dismissed
+  const [showTemplatePicker, setShowTemplatePicker] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (authState.status !== "authenticated") return;
@@ -20,6 +25,17 @@ export function EditorPage() {
       initializeData(tree.id),
     );
   }, [authState, initializeData]);
+
+  // Show template picker once after data loads if the tree is empty
+  useEffect(() => {
+    if (!isHydrated || showTemplatePicker !== null) return;
+    setShowTemplatePicker(units.length === 0);
+  }, [isHydrated, units.length, showTemplatePicker]);
+
+  const handleTemplateApplied = () => {
+    setShowTemplatePicker(false);
+    if (treeId) void initializeData(treeId);
+  };
 
   if (authState.status === "loading" || !isHydrated) {
     return (
@@ -64,6 +80,14 @@ export function EditorPage() {
           </div>
         )}
       </section>
+
+      {showTemplatePicker && treeId && (
+        <TemplatePickerModal
+          treeId={treeId}
+          onApplied={handleTemplateApplied}
+          onSkip={() => setShowTemplatePicker(false)}
+        />
+      )}
     </main>
   );
 }

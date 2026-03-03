@@ -79,7 +79,40 @@
 - 状态：已实现
 - 备注：父系/母系视图中，已可见 unit 的另一分支父节点也纳入可见集合。
 
-## 15. 数据与迁移相关
+## 15. REQ-F-013 用户注册
+- 代码：`src/pages/LoginPage.tsx`, `src/lib/auth.ts`
+- 状态：已实现
+- 备注：邮箱 + 密码注册，Supabase Auth；邮箱确认场景有提示文案。
+
+## 16. REQ-F-014 用户登录 / 登出
+- 代码：`src/pages/LoginPage.tsx`, `src/components/layout/TopBar.tsx`, `src/lib/auth.ts`
+- 状态：已实现
+- 备注：登录后跳转编辑页；TopBar 右上角"退出登录"按钮调用 `signOut()`。
+
+## 17. REQ-F-015 注册时自动创建家谱树
+- 代码：`src/pages/LoginPage.tsx`（注册成功后调用 `getOrCreateTree(user.id)`）, `src/lib/treePersistence.ts`
+- 状态：已实现
+- 备注：`getOrCreateTree` 幂等，登录时也会调用以确保树始终存在。
+
+## 18. REQ-F-016 编辑页访问控制
+- 代码：`src/hooks/useAuthGuard.ts`, `src/pages/EditorPage.tsx`
+- 状态：已实现
+- 备注：未登录时重定向 `/login`；订阅 `onAuthStateChange` 处理 token 过期与主动登出。
+
+## 19. REQ-F-017 分享链接无需登录只读访问
+- 代码：`src/pages/ReadOnlyPage.tsx`, `src/lib/treePersistence.ts`（`getTreeByToken`）, `supabase/schema_multiuser.sql`（`get_tree_by_token` SECURITY DEFINER 函数）
+- 状态：已实现
+- 备注：anon 角色通过 RPC 函数读取分享数据；RLS 策略确保非授权数据不可见。
+
+## 20. REQ-F-018 历史数据自动归属
+- 代码：`supabase/migration_to_multiuser.sql`
+- 状态：已实现（SQL 脚本待在 Supabase 控制台执行）
+- 备注：将所有无 `tree_id` 的历史记录归属到第一个注册账号的树。
+
+## 21. 数据与迁移相关
 - V2 Schema：`supabase/schema_v2.sql`
 - V1->V2 Migration：`supabase/migration_v1_to_v2.sql`
+- 多用户 Schema：`supabase/schema_multiuser.sql`
+- 多用户迁移：`supabase/migration_to_multiuser.sql`
+- 头像存储策略：`supabase/storage_policies_avatars.sql`
 - 自动关系清理：`supabase/cleanup_auto_relations.sql`
